@@ -1,65 +1,61 @@
 import streamlit as st
-import numpy as np
 import cv2
+import tempfile
+import numpy as np
 import tensorflow as tf
-from PIL import Image
 
-# Load model
-model = tf.keras.models.load_model("sign_model.h5")
-class_names = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+# Konfigurasi Streamlit
+st.set_page_config(page_title="Penerjemah Bahasa Isyarat", layout="wide")
+st.title("📹 Pembaca Video Bahasa Isyarat")
 
-# Setup halaman
-st.set_page_config(page_title="Sign Language Translator", layout="wide")
-st.title("🤟 ASL Sign Language Translator (A–Z)")
+# Load model CNN
+model = tf.keras.models.load_model('sign_model.h5')
+class_names = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")  # asumsi model output-nya 26 kelas
 
-# Start camera toggle
-run = st.toggle("🎥 Start Camera")
+# Upload video
+uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi", "mpeg"])
 
-# Layout dua kolom
-col1, col2 = st.columns([3, 1])
+if uploaded_file is not None:
+    # Simpan ke file temporer
+    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile.write(uploaded_file.read())
 
-# Inisialisasi frame
-FRAME_WINDOW = col1.image([], channels="RGB")
-predicted_letter_box = col2.empty()
+    # Layout 2 kolom
+    col1, col2 = st.columns(2)
 
-# Inisialisasi kamera
-cap = cv2.VideoCapture(0) if run else None
+    with col1:
+        st.subheader("🎥 Video Asli")
+        st.video(tfile.name)
 
-if run:
-    st.warning("Klik toggle lagi untuk stop kamera")
+    with col2:
+        st.subheader("🔠 Hasil Translate Huruf")
 
-# Loop
-while run:
-    ret, frame = cap.read()
-    if not ret:
-        st.error("Kamera tidak tersedia.")
-        break
+        # Tombol untuk mulai menerjemahkan video
+        if st.button("🔤 Terjemahkan Video"):
+            cap = cv2.VideoCapture(tfile.name)
+            pred_text = ""
+            frame_count = 0
 
-    # Crop tengah & resize
-    h, w, _ = frame.shape
-    roi = frame[h//4:h//4*3, w//4:w//4*3]
-    roi = cv2.resize(roi, (64, 64))
-    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    roi_gray = roi_gray.reshape(1, 64, 64, 1) / 255.0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-    # Prediksi huruf
-    pred = model.predict(roi_gray)
-    pred_class = class_names[np.argmax(pred)]
-    confidence = np.max(pred) * 100
+                # Hanya proses setiap 10 frame agar cepat
+                if frame_count % 10 == 0:
+                    img = cv2.resize(frame, (64, 64))  # Sesuaikan input model
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = img / 255.0
+                    img = np.expand_dims(img, axis=0)
 
-    # Tampilkan di frame
-    cv2.putText(frame, f"{pred_class} ({confidence:.1f}%)", (10, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3)
+                    prediction = model.predict(img, verbose=0)
+                    class_index = np.argmax(prediction)
+                    predicted_letter = class_names[class_index]
+                    pred_text += predicted_letter + " "
 
-    # Stream ke app
-    FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                frame_count += 1
 
-    # Tampilkan huruf besar di kanan
-    with predicted_letter_box.container():
-        st.markdown("## ✍️ Prediksi Huruf")
-        st.markdown(f"<div style='font-size:120px; text-align:center; color:#00BFFF;'>{pred_class}</div>", unsafe_allow_html=True)
+            cap.release()
 
-# Stop kamera
-if cap:
-    cap.release()
-    cv2.destroyAllWindows()
+            st.success("✅ Video berhasil diterjemahkan!")
+            st.markdown(f"### 🧠 Hasil Prediksi:\n**{pred_text.strip()}**")
