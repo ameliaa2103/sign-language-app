@@ -3,64 +3,63 @@ import tempfile
 import cv2
 import numpy as np
 import tensorflow as tf
+from PIL import Image
 
-# Load model
+# Load model CNN
 model = tf.keras.models.load_model("sign_model.h5")
 class_names = [chr(i) for i in range(65, 91)]  # A-Z
 
-# Streamlit config
-st.set_page_config(page_title="Penerjemah Video Bahasa Isyarat", layout="centered")
+# Layout utama
+st.set_page_config(page_title="Penerjemah Video Bahasa Isyarat", layout="wide")
 st.title("📺 Pembaca Video Bahasa Isyarat")
-st.write("Unggah video berisi bahasa isyarat, lalu klik tombol **🧠 Terjemahkan** untuk melihat hasil prediksi huruf.")
+st.markdown("Unggah video berisi bahasa isyarat, lalu klik tombol **Terjemahkan** untuk melihat hasil.")
 
 # Upload video
-video_file = st.file_uploader("📤 Upload Video", type=["mp4", "avi", "mov", "mpeg"])
+video_file = st.file_uploader("Upload Video", type=["mp4", "avi", "mov", "mpeg"])
 
-# Simpan & tampilkan video
+# Kotak terpisah untuk video & hasil translate
+col1, col2 = st.columns(2)
+
 if video_file is not None:
+    # Simpan sementara
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(video_file.read())
     video_path = tfile.name
-    st.video(video_path)
 
-    # Inisialisasi area hasil terjemahan
-    st.markdown("---")
-    st.subheader("🔤 Hasil Translate:")
+    # Tampilkan video di sebelah kiri
+    with col1:
+        st.video(video_path)
+        proses = st.button("🧠 Terjemahkan")
 
-    # Tombol untuk mulai menerjemahkan
-    if st.button("🧠 Terjemahkan"):
+    if proses:
         cap = cv2.VideoCapture(video_path)
         output_text = ""
-        pred_per_frame = []
         frame_count = 0
 
-        st.info("🔄 Sedang memproses video...")
+        with st.spinner("🔄 Memproses video..."):
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+                frame_count += 1
+                if frame_count % 10 != 0:  # hanya ambil tiap 10 frame
+                    continue
 
-            frame_count += 1
-            if frame_count % 10 != 0:  # ambil setiap 10 frame
-                continue
+                # Preprocessing
+                img = cv2.resize(frame, (64, 64))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = img / 255.0
+                img = np.expand_dims(img, axis=0)
 
-            # Preprocessing
-            img = cv2.resize(frame, (64, 64))
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = img / 255.0
-            img = np.expand_dims(img, axis=0)
+                # Prediksi
+                pred = model.predict(img, verbose=0)
+                pred_label = class_names[np.argmax(pred)]
+                output_text += pred_label
 
-            # Predict huruf
-            pred = model.predict(img)
-            label = class_names[np.argmax(pred)]
-            output_text += label
-            pred_per_frame.append(label)
+            cap.release()
 
-        cap.release()
-
-        # Tampilkan hasil terjemahan huruf
-        st.success("✅ Terjemahan selesai")
-        st.markdown(f"### 📝 Kalimat: `{output_text}`")
-        st.markdown("### 📜 Translate Per Gerakan:")
-        st.markdown("".join([f"`{char}` " for char in pred_per_frame]))
+        with col2:
+            st.success("✅ Terjemahan Selesai")
+            st.subheader("📝 Hasil Translate:")
+            st.code(output_text, language="markdown")
